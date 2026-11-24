@@ -180,39 +180,31 @@ impl State {
         self.draw();
     }
 
-    fn cancel(&mut self) {
+    fn finish(&mut self, color: &str, icon: char, message: &str) {
         self.active = false;
         if self.is_tty {
             eprint!("{CSI}{}A", self.drawn);
             eprint!("\r{CSI}0J");
             eprintln!(
-                "\x1b[31m✗\x1b[0m {} (cancelled after {:.1?})",
+                "{CSI}{color}{icon}{CSI}0m {} {CSI}90m{message}{:.1?}{CSI}0m",
                 self.title,
                 self.started.elapsed()
             );
             let _ = std::io::stderr().flush();
         } else {
             eprintln!(
-                "✗ {} (cancelled after {:.1?})",
+                "{icon} {} {message}{:.1?}",
                 self.title,
                 self.started.elapsed()
             );
         }
     }
 
+    fn cancel(&mut self) {
+        self.finish("31m", '✗', "cancelled after ");
+    }
+
     fn complete(&mut self) {
-        self.active = false;
-        if self.is_tty {
-            eprint!("{CSI}{}A", self.drawn);
-            eprint!("\r{CSI}0J");
-            eprintln!(
-                "\x1b[32m✓\x1b[0m {} {:.1?}",
-                self.title,
-                self.started.elapsed()
-            );
-            std::io::stderr().flush().unwrap();
-        } else {
-            eprintln!("✓ {} {:.1?}", self.title, self.started.elapsed())
-        }
+        self.finish("32m", '✓', "");
     }
 }

@@ -13,8 +13,8 @@ A small terminal progress bar for Rust. Standard library only.
 - **Stderr only.** Stdout stays free for real output.
 - **Always moving.** A background thread redraws every 80ms, so the spinner and timer move even when progress stalls.
 - **Finished work collapses.** `complete()` replaces the bar with one `✓` line, so a run leaves a clean list of what was done and how long it took.
-- **Failure is visible.** Dropping a bar mid-task leaves a red `✗ ... (cancelled after 1.2s)`.
-- **Pipes stay clean.** When stderr is not a terminal, nothing animates and each task prints only its `✓` line.
+- **Failure is visible.** A task that never completes, because the bar is dropped or `start` is called again, leaves a red `✗ ... cancelled after 1.2s`.
+- **Pipes stay clean.** When stderr is not a terminal, nothing animates and each task prints one plain `✓` or `✗` line.
 
 ## Usage
 
