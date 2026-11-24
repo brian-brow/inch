@@ -158,6 +158,7 @@ impl State {
         let empty = self.empty_char.to_string().repeat(self.width - filled);
         let spinner = SPINNER[(self.started.elapsed().as_millis() / 80) as usize % SPINNER.len()];
         let mut frame = String::new();
+        write!(frame, "{CSI}?7l").unwrap();
         if self.drawn > 0 {
             write!(frame, "{CSI}{}A", self.drawn).unwrap();
         }
@@ -171,6 +172,7 @@ impl State {
         self.write_logs(&mut frame, LOG_LIMIT);
         writeln!(frame, "\r{CSI}2K[{fill}{empty}] {percentage}%").unwrap();
         writeln!(frame).unwrap();
+        write!(frame, "{CSI}?7h").unwrap();
         eprint!("{frame}");
         self.drawn = frame.matches('\n').count();
         std::io::stderr().flush().unwrap();

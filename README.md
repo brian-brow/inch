@@ -41,5 +41,6 @@ bar.complete();
 ## Does not
 
 - Run more than one bar at a time.
-- Handle titles or log lines wider than the terminal. They wrap and break the redraw.
+- Truncate long lines neatly. Titles and logs wider than the terminal are cut off at the edge, with no `…`.
+- Survive resizing the terminal while a bar is live. The redraw leaves a stray copy behind.
 - Protect against output that skips `println()`. Anything else printed to the terminal while a bar is live corrupts the display.

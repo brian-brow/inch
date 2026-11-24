@@ -32,6 +32,9 @@ fn main() {
         for i in 0..=total {
             bar.update(i);
             thread::sleep(Duration::from_micros(200));
+            if title == "installing your mom..." && i == 5000 {
+                bar.println(&"this log line is far too long for any reasonable terminal ".repeat(6));
+            }
             if title == "downloading rocket league..." {
                 if i % 4000 == 0 {
                     bar.println(DOWNLOAD_LOGS[i / 4000 % DOWNLOAD_LOGS.len()]);
