@@ -1,4 +1,5 @@
 use std::{
+    fmt::Write as _,
     io::{IsTerminal, Write},
     sync::{
         Arc, Mutex,
@@ -10,8 +11,6 @@ use std::{
 
 /// Starts an ANSI escape sequence ("Control Sequence Introducer").
 const CSI: &str = "\x1b[";
-/// How many terminal lines one draw of the bar takes up.
-const BAR_LINES: u32 = 3;
 /// Empty character used when the caller doesn't set one.
 const DEFAULT_EMPTY: char = '░';
 /// Bar width used when caller doesn't set one.
@@ -94,9 +93,10 @@ impl Default for Bar {
 
 impl Drop for Bar {
     fn drop(&mut self) {
-        let was_running = self.ticker.is_some();
         self.stop_ticker();
-        if was_running && let Ok(state) = self.state.lock() {
+        if let Ok(mut state) = self.state.lock()
+            && state.active
+        {
             state.cancel();
         }
     }
@@ -111,6 +111,9 @@ struct State {
     fill_char: char,
     empty_char: char,
     is_tty: bool,
+    logs: Vec<String>,
+    drawn: usize,
+    active: bool,
 }
 
 impl State {
@@ -124,10 +127,13 @@ impl State {
             fill_char: DEFAULT_FILL,
             empty_char: DEFAULT_EMPTY,
             is_tty: std::io::stderr().is_terminal(),
+            logs: Vec::new(),
+            drawn: 0,
+            active: false,
         }
     }
 
-    fn draw(&self) {
+    fn draw(&mut self) {
         if !self.is_tty {
             return;
         }
@@ -137,15 +143,22 @@ impl State {
             .unwrap_or(self.width);
         let fill = self.fill_char.to_string().repeat(filled);
         let empty = self.empty_char.to_string().repeat(self.width - filled);
-        let frame = SPINNER[(self.started.elapsed().as_millis() / 80) as usize % SPINNER.len()];
-        eprint!("{CSI}{BAR_LINES}A");
-        eprintln!(
-            "\r{CSI}2K{frame} {} {:.1?}",
+        let spinner = SPINNER[(self.started.elapsed().as_millis() / 80) as usize % SPINNER.len()];
+        let mut frame = String::new();
+        if self.drawn > 0 {
+            write!(frame, "{CSI}{}A", self.drawn).unwrap();
+        }
+        writeln!(
+            frame,
+            "\r{CSI}2K{spinner} {} {:.1?}",
             self.title,
             self.started.elapsed()
-        );
-        eprintln!("\r{CSI}2K[{fill}{empty}] {percentage}%");
-        eprintln!();
+        )
+        .unwrap();
+        writeln!(frame, "\r{CSI}2K[{fill}{empty}] {percentage}%").unwrap();
+        writeln!(frame).unwrap();
+        eprint!("{frame}");
+        self.drawn = frame.matches('\n').count();
         std::io::stderr().flush().unwrap();
     }
 
@@ -154,32 +167,43 @@ impl State {
     }
 
     fn start(&mut self, title: &str, total: usize) {
-        if self.is_tty {
-            for _ in 0..BAR_LINES {
-                eprintln!();
-            }
+        if self.active {
+            self.cancel();
         }
         self.title = title.to_string();
         self.total = total;
         self.progress = 0;
         self.started = Instant::now();
+        self.logs = Vec::new();
+        self.drawn = 0;
+        self.active = true;
         self.draw();
     }
 
-    fn cancel(&self) {
-        eprint!("{CSI}{BAR_LINES}A");
-        eprint!("\r{CSI}0J");
-        eprintln!(
-            "\x1b[31m✗\x1b[0m {} (cancelled after {:.1?})",
-            self.title,
-            self.started.elapsed()
-        );
-        let _ = std::io::stderr().flush();
+    fn cancel(&mut self) {
+        self.active = false;
+        if self.is_tty {
+            eprint!("{CSI}{}A", self.drawn);
+            eprint!("\r{CSI}0J");
+            eprintln!(
+                "\x1b[31m✗\x1b[0m {} (cancelled after {:.1?})",
+                self.title,
+                self.started.elapsed()
+            );
+            let _ = std::io::stderr().flush();
+        } else {
+            eprintln!(
+                "✗ {} (cancelled after {:.1?})",
+                self.title,
+                self.started.elapsed()
+            );
+        }
     }
 
-    fn complete(&self) {
+    fn complete(&mut self) {
+        self.active = false;
         if self.is_tty {
-            eprint!("{CSI}{BAR_LINES}A");
+            eprint!("{CSI}{}A", self.drawn);
             eprint!("\r{CSI}0J");
             eprintln!(
                 "\x1b[32m✓\x1b[0m {} {:.1?}",
