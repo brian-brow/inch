@@ -5,6 +5,10 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+pub mod spinners;
+
+use spinners::Spinner;
+
 /// Starts an ANSI escape sequence ("Control Sequence Introducer").
 const CSI: &str = "\x1b[";
 
@@ -15,8 +19,10 @@ const DEFAULT_FILL: char = '█';
 /// Empty character used when the caller doesn't set one.
 const DEFAULT_EMPTY: char = '░';
 
-/// Frames of the spinner shown before the title.
-const SPINNER: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+/// Spinner used when the caller doesn't set one.
+const DEFAULT_SPINNER: Spinner = spinners::DOTS;
+/// Slowest the bar redraws, so the timer keeps moving under slow spinners.
+const MAX_TICK: Duration = Duration::from_millis(80);
 /// Most log lines shown under a running task.
 const LOG_LIMIT: usize = 10;
 
@@ -51,6 +57,11 @@ impl Bar {
         self
     }
 
+    pub fn with_spinner(self, spinner: Spinner) -> Self {
+        self.state.lock().unwrap().spinner = spinner;
+        self
+    }
+
     /// Begins a new task, cancelling the current one if it never completed.
     pub fn start(&mut self, title: &str, total: usize) {
         self.stop_ticker();
@@ -61,11 +72,12 @@ impl Bar {
         self.stop.store(false, Ordering::Relaxed);
         let state = Arc::clone(&self.state);
         let stop = Arc::clone(&self.stop);
+        let tick = self.state.lock().unwrap().spinner.interval.min(MAX_TICK);
 
         self.ticker = Some(thread::spawn(move || {
             while !stop.load(Ordering::Relaxed) {
                 state.lock().unwrap().draw();
-                thread::sleep(Duration::from_millis(80));
+                thread::sleep(tick);
             }
         }));
     }
@@ -121,6 +133,7 @@ struct State {
     width: usize,
     fill_char: char,
     empty_char: char,
+    spinner: Spinner,
     is_tty: bool,
     task: Option<Task>,
 }
@@ -131,6 +144,7 @@ impl State {
             width: DEFAULT_WIDTH,
             fill_char: DEFAULT_FILL,
             empty_char: DEFAULT_EMPTY,
+            spinner: DEFAULT_SPINNER,
             is_tty: stderr().is_terminal(),
             task: None,
         }
@@ -159,7 +173,7 @@ impl State {
             .unwrap_or(self.width);
         let fill = self.fill_char.to_string().repeat(filled);
         let empty = self.empty_char.to_string().repeat(self.width - filled);
-        let spinner = SPINNER[(task.started.elapsed().as_millis() / 80) as usize % SPINNER.len()];
+        let spinner = self.spinner.frame(task.started.elapsed());
 
         let mut frame = String::new();
         write!(frame, "{CSI}?7l").unwrap();

@@ -1,7 +1,7 @@
 use std::thread;
 use std::time::Duration;
 
-use inch::Bar;
+use inch::{Bar};
 
 fn main() {
     let installs = [

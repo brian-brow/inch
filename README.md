@@ -36,7 +36,9 @@ for i in 0..=100 {
 bar.complete();
 ```
 
-`cargo run` runs the demo in `src/main.rs`.
+`with_spinner(inch::spinners::LINE)` picks one of the 50 single-character spinners from [cli-spinners](https://github.com/sindresorhus/cli-spinners). The default is `DOTS`.
+
+`cargo run` runs the demo in `src/main.rs`. `cargo run --example spinners [name]` previews the spinners.
 
 ## Does not
 
@@ -44,3 +46,7 @@ bar.complete();
 - Truncate long lines neatly. Titles and logs wider than the terminal are cut off at the edge, with no `…`.
 - Survive resizing the terminal while a bar is live. The redraw leaves a stray copy behind.
 - Protect against output that skips `println()`. Anything else printed to the terminal while a bar is live corrupts the display.
+
+## License
+
+MIT, see [LICENSE](LICENSE). The spinners in `src/spinners.rs` come from [cli-spinners](https://github.com/sindresorhus/cli-spinners), also MIT, with its notice at the top of that file.
