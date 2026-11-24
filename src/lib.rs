@@ -19,6 +19,8 @@ const DEFAULT_WIDTH: usize = 20;
 const DEFAULT_FILL: char = '█';
 /// Spinner animation
 const SPINNER: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+/// Max amount of logs shown for any one element
+const LOG_LIMIT: usize = 10;
 
 pub struct Bar {
     state: Arc<Mutex<State>>,
@@ -81,6 +83,17 @@ impl Bar {
         self.stop.store(true, Ordering::Relaxed);
         if let Some(handle) = self.ticker.take() {
             let _ = handle.join();
+        }
+    }
+
+    pub fn println(&self, message: &str) {
+        if let Ok(mut state) = self.state.lock()
+            && state.active
+            && state.is_tty
+        {
+            state.logs.push(message.to_string());
+        } else {
+            eprintln!("{message}");
         }
     }
 }
@@ -155,11 +168,24 @@ impl State {
             self.started.elapsed()
         )
         .unwrap();
+        self.write_logs(&mut frame, LOG_LIMIT);
         writeln!(frame, "\r{CSI}2K[{fill}{empty}] {percentage}%").unwrap();
         writeln!(frame).unwrap();
         eprint!("{frame}");
         self.drawn = frame.matches('\n').count();
         std::io::stderr().flush().unwrap();
+    }
+
+    fn write_logs(&self, frame: &mut String, limit: usize) {
+        let shown = &self.logs[self.logs.len().saturating_sub(limit)..];
+        for (i, log) in shown.iter().enumerate() {
+            let prefix = if i == shown.len() - 1 {
+                "╰─ "
+            } else {
+                "├─ "
+            };
+            writeln!(frame, "\r{CSI}2K{CSI}2m{prefix}{log}{CSI}0m").unwrap();
+        }
     }
 
     fn update(&mut self, progress: usize) {
@@ -202,6 +228,9 @@ impl State {
 
     fn cancel(&mut self) {
         self.finish("31m", '✗', "cancelled after ");
+        let mut frame = String::new();
+        self.write_logs(&mut frame, self.logs.len());
+        eprint!("{frame}")
     }
 
     fn complete(&mut self) {
