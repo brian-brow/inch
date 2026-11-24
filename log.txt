@@ -1,0 +1,6 @@
+   Compiling bar v0.1.0 (/home/brian/Projects/rust)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.23s
+     Running `target/debug/bar`
+✓ installing your mom... 2.5s
+✓ downloading rocket league... 2.5s
+✓ uninstalling rocket league... 5.0s

@@ -1,4 +1,7 @@
-use std::{io::Write, time::Instant};
+use std::{
+    io::{IsTerminal, Write},
+    time::Instant,
+};
 
 /// Starts an ANSI escape sequence ("Control Sequence Introducer").
 const CSI: &str = "\x1b[";
@@ -20,6 +23,7 @@ pub struct Bar {
     started: Instant,
     fill_char: char,
     empty_char: char,
+    is_tty: bool,
 }
 
 impl Bar {
@@ -33,6 +37,7 @@ impl Bar {
             started: Instant::now(),
             fill_char: DEFAULT_FILL,
             empty_char: DEFAULT_EMPTY,
+            is_tty: std::io::stderr().is_terminal(),
         }
     }
 
@@ -52,6 +57,9 @@ impl Bar {
     }
 
     fn draw(&mut self) {
+        if !self.is_tty {
+            return;
+        }
         let percentage = (self.progress * 100).checked_div(self.total).unwrap_or(100);
         if self.last_percent == Some(percentage) {
             return;
@@ -62,11 +70,11 @@ impl Bar {
             .unwrap_or(self.width);
         let fill = self.fill_char.to_string().repeat(filled);
         let empty = self.empty_char.to_string().repeat(self.width - filled);
-        print!("{CSI}{BAR_LINES}A");
-        println!("\r{CSI}2K{}", self.title);
-        println!("\r{CSI}2K[{fill}{empty}] {percentage}%",);
-        println!();
-        std::io::stdout().flush().unwrap();
+        eprint!("{CSI}{BAR_LINES}A");
+        eprintln!("\r{CSI}2K{} {:.1?}", self.title, self.started.elapsed());
+        eprintln!("\r{CSI}2K[{fill}{empty}] {percentage}%");
+        eprintln!();
+        std::io::stderr().flush().unwrap();
     }
 
     pub fn update(&mut self, progress: usize) {
@@ -75,8 +83,10 @@ impl Bar {
     }
 
     pub fn start(&mut self, title: &str, total: usize) {
-        for _ in 0..BAR_LINES {
-            println!();
+        if self.is_tty {
+            for _ in 0..BAR_LINES {
+                eprintln!();
+            }
         }
         self.title = title.to_string();
         self.total = total;
@@ -87,14 +97,18 @@ impl Bar {
     }
 
     pub fn complete(&mut self) {
-        print!("{CSI}{BAR_LINES}A");
-        print!("\r{CSI}0J");
-        println!(
-            "\x1b[32m✓\x1b[0m {} {:.1?}",
-            self.title,
-            self.started.elapsed()
-        );
-        std::io::stdout().flush().unwrap();
+        if self.is_tty {
+            eprint!("{CSI}{BAR_LINES}A");
+            eprint!("\r{CSI}0J");
+            eprintln!(
+                "\x1b[32m✓\x1b[0m {} {:.1?}",
+                self.title,
+                self.started.elapsed()
+            );
+            std::io::stderr().flush().unwrap();
+        } else {
+            eprintln!("✓ {} {:.1?}", self.title, self.started.elapsed())
+        }
     }
 }
 
