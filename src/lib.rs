@@ -1,27 +1,26 @@
-use std::{
-    fmt::Write as _,
-    io::{IsTerminal, Write},
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
-    },
-    thread::{self, JoinHandle},
-    time::{Duration, Instant},
-};
+use std::fmt::Write as _;
+use std::io::{IsTerminal, Write, stderr};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 
 /// Starts an ANSI escape sequence ("Control Sequence Introducer").
 const CSI: &str = "\x1b[";
-/// Empty character used when the caller doesn't set one.
-const DEFAULT_EMPTY: char = '░';
-/// Bar width used when caller doesn't set one.
+
+/// Bar width used when the caller doesn't set one.
 const DEFAULT_WIDTH: usize = 20;
 /// Fill character used when the caller doesn't set one.
 const DEFAULT_FILL: char = '█';
-/// Spinner animation
+/// Empty character used when the caller doesn't set one.
+const DEFAULT_EMPTY: char = '░';
+
+/// Frames of the spinner shown before the title.
 const SPINNER: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-/// Max amount of logs shown for any one element
+/// Most log lines shown under a running task.
 const LOG_LIMIT: usize = 10;
 
+/// A progress bar drawn to stderr, reused across tasks.
 pub struct Bar {
     state: Arc<Mutex<State>>,
     stop: Arc<AtomicBool>,
@@ -52,10 +51,7 @@ impl Bar {
         self
     }
 
-    pub fn update(&self, progress: usize) {
-        self.state.lock().unwrap().update(progress);
-    }
-
+    /// Begins a new task, cancelling the current one if it never completed.
     pub fn start(&mut self, title: &str, total: usize) {
         self.stop_ticker();
         self.state.lock().unwrap().start(title, total);
@@ -74,6 +70,24 @@ impl Bar {
         }));
     }
 
+    /// Sets progress, clamped to the task's total.
+    pub fn update(&self, progress: usize) {
+        self.state.lock().unwrap().update(progress);
+    }
+
+    /// Adds a line to the running task's log, or prints it directly when no bar is drawn.
+    pub fn println(&self, message: &str) {
+        if let Ok(mut state) = self.state.lock()
+            && state.is_tty
+            && let Some(task) = &mut state.task
+        {
+            task.logs.push(message.to_string());
+        } else {
+            eprintln!("{message}");
+        }
+    }
+
+    /// Replaces the bar and its logs with a single ✓ line.
     pub fn complete(&mut self) {
         self.stop_ticker();
         self.state.lock().unwrap().complete();
@@ -83,17 +97,6 @@ impl Bar {
         self.stop.store(true, Ordering::Relaxed);
         if let Some(handle) = self.ticker.take() {
             let _ = handle.join();
-        }
-    }
-
-    pub fn println(&self, message: &str) {
-        if let Ok(mut state) = self.state.lock()
-            && state.active
-            && state.is_tty
-        {
-            state.logs.push(message.to_string());
-        } else {
-            eprintln!("{message}");
         }
     }
 }
@@ -107,42 +110,41 @@ impl Default for Bar {
 impl Drop for Bar {
     fn drop(&mut self) {
         self.stop_ticker();
-        if let Ok(mut state) = self.state.lock()
-            && state.active
-        {
+        if let Ok(mut state) = self.state.lock() {
             state.cancel();
         }
     }
 }
 
+/// Display config plus the running task, shared with the ticker thread.
 struct State {
-    title: String,
     width: usize,
-    progress: usize,
-    total: usize,
-    started: Instant,
     fill_char: char,
     empty_char: char,
     is_tty: bool,
-    logs: Vec<String>,
-    drawn: usize,
-    active: bool,
+    task: Option<Task>,
 }
 
 impl State {
     fn new() -> Self {
         Self {
-            title: String::new(),
             width: DEFAULT_WIDTH,
-            progress: 0,
-            total: 0,
-            started: Instant::now(),
             fill_char: DEFAULT_FILL,
             empty_char: DEFAULT_EMPTY,
-            is_tty: std::io::stderr().is_terminal(),
-            logs: Vec::new(),
-            drawn: 0,
-            active: false,
+            is_tty: stderr().is_terminal(),
+            task: None,
+        }
+    }
+
+    fn start(&mut self, title: &str, total: usize) {
+        self.cancel();
+        self.task = Some(Task::new(title, total));
+        self.draw();
+    }
+
+    fn update(&mut self, progress: usize) {
+        if let Some(task) = &mut self.task {
+            task.update(progress);
         }
     }
 
@@ -150,43 +152,91 @@ impl State {
         if !self.is_tty {
             return;
         }
-        let percentage = (self.progress * 100).checked_div(self.total).unwrap_or(100);
-        let filled = (self.progress * self.width)
-            .checked_div(self.total)
+        let Some(task) = &mut self.task else { return };
+        let percentage = (task.progress * 100).checked_div(task.total).unwrap_or(100);
+        let filled = (task.progress * self.width)
+            .checked_div(task.total)
             .unwrap_or(self.width);
         let fill = self.fill_char.to_string().repeat(filled);
         let empty = self.empty_char.to_string().repeat(self.width - filled);
-        let spinner = SPINNER[(self.started.elapsed().as_millis() / 80) as usize % SPINNER.len()];
+        let spinner = SPINNER[(task.started.elapsed().as_millis() / 80) as usize % SPINNER.len()];
+
         let mut frame = String::new();
         write!(frame, "{CSI}?7l").unwrap();
-        if self.drawn > 0 {
-            write!(frame, "{CSI}{}A", self.drawn).unwrap();
+        if task.drawn > 0 {
+            write!(frame, "{CSI}{}A", task.drawn).unwrap();
         }
         writeln!(
             frame,
             "\r{CSI}2K{spinner} {} {:.1?}",
-            self.title,
-            self.started.elapsed()
+            task.title,
+            task.started.elapsed()
         )
         .unwrap();
-        self.write_logs(&mut frame, LOG_LIMIT);
+        task.write_logs(&mut frame, LOG_LIMIT);
         writeln!(frame, "\r{CSI}2K[{fill}{empty}] {percentage}%").unwrap();
         writeln!(frame).unwrap();
         write!(frame, "{CSI}?7h").unwrap();
+
         eprint!("{frame}");
-        self.drawn = frame.matches('\n').count();
-        std::io::stderr().flush().unwrap();
+        task.drawn = frame.matches('\n').count();
+        stderr().flush().unwrap();
     }
 
-    fn write_logs(&self, frame: &mut String, limit: usize) {
-        let shown = &self.logs[self.logs.len().saturating_sub(limit)..];
-        for (i, log) in shown.iter().enumerate() {
-            let prefix = if i == shown.len() - 1 {
-                "╰─ "
-            } else {
-                "├─ "
-            };
-            writeln!(frame, "\r{CSI}2K{CSI}2m{prefix}{log}{CSI}0m").unwrap();
+    fn finish(&self, task: &Task, color: &str, icon: char, prefix: &str) {
+        if self.is_tty {
+            eprint!("{CSI}{}A", task.drawn);
+            eprint!("\r{CSI}0J");
+            eprintln!(
+                "{CSI}{color}{icon}{CSI}0m {} {CSI}90m{prefix}{:.1?}{CSI}0m",
+                task.title,
+                task.started.elapsed()
+            );
+            let _ = stderr().flush();
+        } else {
+            eprintln!(
+                "{icon} {} {prefix}{:.1?}",
+                task.title,
+                task.started.elapsed()
+            );
+        }
+    }
+
+    fn cancel(&mut self) {
+        let Some(task) = self.task.take() else { return };
+        self.finish(&task, "31m", '✗', "cancelled after ");
+        if self.is_tty {
+            let mut dump = String::new();
+            task.write_logs(&mut dump, task.logs.len());
+            eprint!("{dump}");
+        }
+    }
+
+    fn complete(&mut self) {
+        let Some(task) = self.task.take() else { return };
+        self.finish(&task, "32m", '✓', "");
+    }
+}
+
+/// One run, from `start` to `complete` or cancel.
+struct Task {
+    title: String,
+    total: usize,
+    progress: usize,
+    started: Instant,
+    logs: Vec<String>,
+    drawn: usize,
+}
+
+impl Task {
+    fn new(title: &str, total: usize) -> Self {
+        Self {
+            title: title.to_string(),
+            total,
+            progress: 0,
+            started: Instant::now(),
+            logs: Vec::new(),
+            drawn: 0,
         }
     }
 
@@ -194,48 +244,15 @@ impl State {
         self.progress = progress.min(self.total);
     }
 
-    fn start(&mut self, title: &str, total: usize) {
-        if self.active {
-            self.cancel();
+    fn write_logs(&self, out: &mut String, limit: usize) {
+        let shown = &self.logs[self.logs.len().saturating_sub(limit)..];
+        for (i, log) in shown.iter().enumerate() {
+            let prefix = if i == shown.len() - 1 {
+                "╰─ "
+            } else {
+                "├─ "
+            };
+            writeln!(out, "\r{CSI}2K{CSI}2m{prefix}{log}{CSI}0m").unwrap();
         }
-        self.title = title.to_string();
-        self.total = total;
-        self.progress = 0;
-        self.started = Instant::now();
-        self.logs = Vec::new();
-        self.drawn = 0;
-        self.active = true;
-        self.draw();
-    }
-
-    fn finish(&mut self, color: &str, icon: char, message: &str) {
-        self.active = false;
-        if self.is_tty {
-            eprint!("{CSI}{}A", self.drawn);
-            eprint!("\r{CSI}0J");
-            eprintln!(
-                "{CSI}{color}{icon}{CSI}0m {} {CSI}90m{message}{:.1?}{CSI}0m",
-                self.title,
-                self.started.elapsed()
-            );
-            let _ = std::io::stderr().flush();
-        } else {
-            eprintln!(
-                "{icon} {} {message}{:.1?}",
-                self.title,
-                self.started.elapsed()
-            );
-        }
-    }
-
-    fn cancel(&mut self) {
-        self.finish("31m", '✗', "cancelled after ");
-        let mut frame = String::new();
-        self.write_logs(&mut frame, self.logs.len());
-        eprint!("{frame}")
-    }
-
-    fn complete(&mut self) {
-        self.finish("32m", '✓', "");
     }
 }
