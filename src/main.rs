@@ -10,7 +10,7 @@ fn main() {
         ("uninstalling rocket league...", 20_000),
     ];
 
-    let mut bar = Bar::new().with_width(20).with_empty('·');
+    let mut bar = Bar::new().with_empty('·');
 
     for (title, total) in installs {
         bar.start(title, total);
