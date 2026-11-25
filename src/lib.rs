@@ -66,15 +66,18 @@ impl Bar {
     /// Begins a new task, cancelling the current one if it never completed.
     pub fn start(&mut self, title: &str, total: usize) {
         self.stop_ticker();
-        self.state.lock().unwrap().start(title, total);
-        if !self.state.lock().unwrap().is_tty {
-            return;
-        }
-        let (tx, rx) = mpsc::channel::<()>();
-        self.stop = Some(tx);
-        let state = Arc::clone(&self.state);
-        let tick = self.state.lock().unwrap().spinner.interval.min(MAX_TICK);
 
+        let tick = {
+            let mut state = self.state.lock().unwrap();
+            state.start(title, total);
+            if !state.is_tty {
+                return;
+            }
+            state.spinner.interval.min(MAX_TICK)
+        };
+
+        let (tx, rx) = mpsc::channel::<()>();
+        let state = Arc::clone(&self.state);
         self.ticker = Some(thread::spawn(move || {
             loop {
                 state.lock().unwrap().draw();
@@ -84,6 +87,7 @@ impl Bar {
                 }
             }
         }));
+        self.stop = Some(tx);
     }
 
     /// Sets progress, clamped to the task's total.

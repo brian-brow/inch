@@ -9,5 +9,5 @@
 
 - [x] Remove the tracked `log.txt`. It's output from an old run.
 - [x] Guard `progress * width` and `progress * 100` against overflow on huge totals.
-- [ ] Take the lock once in `Bar::start` instead of twice.
+- [x] Take the lock once in `Bar::start` instead of twice.
 - [ ] Drive `inch` from Python and TypeScript (stdin command protocol or native bindings).
