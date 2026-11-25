@@ -171,10 +171,8 @@ impl State {
             return;
         }
         let Some(task) = &mut self.task else { return };
-        let percentage = (task.progress * 100).checked_div(task.total).unwrap_or(100);
-        let filled = (task.progress * self.width)
-            .checked_div(task.total)
-            .unwrap_or(self.width);
+        let percentage = scale(task.progress, task.total, 100);
+        let filled = scale(task.progress, task.total, self.width);
         let fill = self.fill_char.to_string().repeat(filled);
         let empty = self.empty_char.to_string().repeat(self.width - filled);
         let spinner = self.spinner.frame(task.started.elapsed());
@@ -272,5 +270,48 @@ impl Task {
             };
             writeln!(out, "\r{CSI}2K{CSI}2m{prefix}{log}{CSI}0m").unwrap();
         }
+    }
+}
+
+/// Scales `progress` out of `total` onto `0..=max`, rounding down.
+/// An empty task (`total == 0`) counts as done.
+fn scale(progress: usize, total: usize, max: usize) -> usize {
+    (progress as u128 * max as u128)
+        .checked_div(total as u128)
+        .unwrap_or(max as u128) as usize
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_task_is_full() {
+        assert_eq!(scale(0, 0, 100), 100);
+        assert_eq!(scale(0, 0, 20), 20);
+    }
+
+    #[test]
+    fn finished_task_is_full() {
+        assert_eq!(scale(10, 10, 100), 100);
+        assert_eq!(scale(10, 10, 20), 20);
+    }
+
+    #[test]
+    fn partial_task_scales() {
+        assert_eq!(scale(3, 10, 100), 30);
+        assert_eq!(scale(3, 10, 20), 6);
+    }
+
+    #[test]
+    fn partial_task_rounds_down() {
+        assert_eq!(scale(1, 3, 100), 33);
+        assert_eq!(scale(1, 3, 20), 6);
+    }
+
+    #[test]
+    fn huge_totals_dont_overflow() {
+        assert_eq!(scale(usize::MAX, usize::MAX, 100), 100);
+        assert_eq!(scale(usize::MAX / 2, usize::MAX, 100), 49);
     }
 }
