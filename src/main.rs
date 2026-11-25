@@ -1,7 +1,7 @@
 use std::thread;
 use std::time::Duration;
 
-use inch::{Bar};
+use inch::Bar;
 
 fn main() {
     let installs = [
@@ -9,6 +9,10 @@ fn main() {
         ("downloading rocket league...", 20_000),
         ("uninstalling rocket league...", 7_000),
     ];
+    // Each install is a (title, total) pair that drives one run of the bar.
+    // The totals are step counts, not bytes; each step sleeps 200µs below.
+    // "downloading rocket league..." bails out at 18_000 to show an incomplete bar.
+    // The log arrays below get printed above the bar mid-run via bar.println().
 
     const DOWNLOAD_LOGS: [&str; 5] = [
         "going up",

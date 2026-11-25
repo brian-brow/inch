@@ -1,6 +1,6 @@
 use std::fmt::Write as _;
 use std::io::{IsTerminal, Write, stderr};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -29,7 +29,8 @@ const LOG_LIMIT: usize = 10;
 /// A progress bar drawn to stderr, reused across tasks.
 pub struct Bar {
     state: Arc<Mutex<State>>,
-    stop: Arc<AtomicBool>,
+    /// Dropping this sender disconnects the channel, which stops the ticker.
+    stop: Option<Sender<()>>,
     ticker: Option<JoinHandle<()>>,
 }
 
@@ -37,7 +38,7 @@ impl Bar {
     pub fn new() -> Self {
         Self {
             state: Arc::new(Mutex::new(State::new())),
-            stop: Arc::new(AtomicBool::new(false)),
+            stop: None,
             ticker: None,
         }
     }
@@ -69,15 +70,18 @@ impl Bar {
         if !self.state.lock().unwrap().is_tty {
             return;
         }
-        self.stop.store(false, Ordering::Relaxed);
+        let (tx, rx) = mpsc::channel::<()>();
+        self.stop = Some(tx);
         let state = Arc::clone(&self.state);
-        let stop = Arc::clone(&self.stop);
         let tick = self.state.lock().unwrap().spinner.interval.min(MAX_TICK);
 
         self.ticker = Some(thread::spawn(move || {
-            while !stop.load(Ordering::Relaxed) {
+            loop {
                 state.lock().unwrap().draw();
-                thread::sleep(tick);
+                match rx.recv_timeout(tick) {
+                    Err(RecvTimeoutError::Timeout) => {}
+                    _ => break,
+                }
             }
         }));
     }
@@ -106,7 +110,7 @@ impl Bar {
     }
 
     fn stop_ticker(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
+        self.stop = None;
         if let Some(handle) = self.ticker.take() {
             let _ = handle.join();
         }
