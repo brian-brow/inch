@@ -55,7 +55,7 @@ for file in bar.wrap("copying...", files) {
 [        ▁▃▁··········] 42%
 ```
 
-`cargo run` runs the demo in `src/main.rs`: one Rocket League session that installs, updates, fails to find a match, plays one with the worm, and gets cancelled mid rage-quit. `cargo run --example spinners [name]` previews the spinners.
+`cargo run --example demo` runs the demo in `examples/demo.rs`: one Rocket League session that installs, updates, fails to find a match, plays one with the worm, and gets cancelled mid rage-quit. `cargo run --example spinners [name]` previews the spinners.
 
 ## Does not
 
