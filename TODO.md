@@ -6,7 +6,7 @@
 - [x] Move the percent/fill math into a pure function and test `total == 0`, `progress == total` and a partial value.
 - [x] Add `Bar::inc()` to bump progress by 1, so loops don't have to track their own counter.
 - [ ] Brainstorm more features.
-- [ ] Tune the worm: drive its gait from progress instead of time, so it crawls instead of sliding.
+- [x] Tune the worm: drive its gait from progress instead of time, so it crawls instead of sliding.
 
 ## Nice to have
 

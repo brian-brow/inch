@@ -27,10 +27,10 @@ const MAX_TICK: Duration = Duration::from_millis(80);
 const LOG_LIMIT: usize = 10;
 
 /// The worm's gait, one body shape per frame, each ending at the head (last char).
-/// Stretched, tail creeps in, bunched up, head reaches out, then back to stretched.
-const WORM: &[&str] = &["▁▁▁▁", "▁▃▁", "▆▁", "▁▃▁"];
-/// How long each worm frame shows.
-const WORM_STEP: Duration = Duration::from_millis(240);
+/// Stretched, tail creeps in, arches up, bunches, then reaches back out to stretched.
+/// Each cell of progress plays every frame once, so more frames make a smoother step,
+/// not a slower one.
+const WORM: &[&str] = &["▁▁▁▁", "▁▁▂▁", "▁▄▁", "▇▁", "▁▄▁", "▁▂▁▁"];
 
 /// How the bar between the brackets is drawn.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -39,6 +39,7 @@ pub enum Style {
     #[default]
     Blocks,
     /// An inchworm crawling along the bar, leaving the fill behind it.
+    /// Its gait follows progress, so it crawls as work gets done and rests when it stalls.
     Worm,
 }
 
@@ -223,11 +224,11 @@ impl State {
                 bar
             }
             Style::Worm => {
-                let head = scale(task.progress, task.total, self.width.saturating_sub(1));
-                let phase = (task.started.elapsed().as_millis() / WORM_STEP.as_millis()) as usize;
-                let head = head.min(self.width - 1);
+                let steps = scale(task.progress, task.total, (self.width - 1) * WORM.len());
+                let head = steps / WORM.len();
+                let phase = steps % WORM.len();
 
-                let frame: Vec<char> = WORM[phase % WORM.len()].chars().collect();
+                let frame: Vec<char> = WORM[phase].chars().collect();
                 let visible = &frame[frame.len().saturating_sub(head + 1)..];
                 let before = head + 1 - visible.len();
                 let after = self.width - head - 1;

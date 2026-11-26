@@ -40,7 +40,7 @@ bar.complete();
 
 `with_spinner(inch::spinners::LINE)` picks one of the 50 single-character spinners from [cli-spinners](https://github.com/sindresorhus/cli-spinners). The default is `DOTS`.
 
-`with_style(inch::Style::Worm)` swaps the filled bar for an inchworm that crawls along it. The fill character becomes the trail it leaves behind, and the empty character is the track ahead:
+`with_style(inch::Style::Worm)` swaps the filled bar for an inchworm that crawls along it. Its gait is driven by progress, not time: every cell of progress is one full step, so it crawls as fast as the work goes and rests when the work stalls. The fill character becomes the trail it leaves behind, and the empty character is the track ahead:
 
 ```
 [        ▁▃▁··········] 42%

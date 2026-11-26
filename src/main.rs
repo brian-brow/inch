@@ -28,8 +28,11 @@ fn main() {
         "that wasn't even my fault",
     ];
 
-    // let mut bar = Bar::new().with_fill(' ').with_empty('·').with_style(inch::Style::Worm);
-    let mut bar = Bar::new().with_fill('*').with_empty('·');
+    let mut bar = Bar::new()
+        .with_fill(' ')
+        .with_empty('·')
+        .with_style(inch::Style::Worm);
+    // let mut bar = Bar::new().with_fill('*').with_empty('·');
     let mut stop = false;
 
     for (title, total) in installs {
