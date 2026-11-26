@@ -3,7 +3,7 @@
 A small terminal progress bar for Rust. Standard library only.
 
 ```
-✓ installing your mom... 2.5s
+✓ installing money... 2.5s
 ⠹ downloading rocket league... 1.2s
 ├─ going up
 ╰─ going down
@@ -13,7 +13,7 @@ A small terminal progress bar for Rust. Standard library only.
 ## Ideas
 
 - **Stderr only.** Stdout stays free for real output.
-- **Always moving.** A background thread redraws every 80ms, so the spinner and timer move even when progress stalls.
+- **Always moving.** A background thread redraws at least every 80ms, so the spinner, timer and worm move even when progress stalls.
 - **Finished work collapses.** `complete()` replaces the bar and its logs with one `✓` line, so a run leaves a clean list of what was done and how long it took.
 - **Logs belong to their task.** `println()` adds a line to the running task's log. The last 10 show under the title while it runs.
 - **Failure keeps its context.** A task that never completes, because the bar is dropped or `start` is called again, leaves a red `✗ ... cancelled after 1.2s` with its full log underneath.
@@ -27,8 +27,8 @@ use inch::Bar;
 let mut bar = Bar::new().with_width(30).with_fill('#').with_empty('-');
 
 bar.start("downloading...", 100);
-for i in 0..=100 {
-    bar.update(i);
+for i in 0..100 {
+    bar.inc();
     if i == 50 {
         bar.println("halfway");
     }
@@ -36,7 +36,15 @@ for i in 0..=100 {
 bar.complete();
 ```
 
+`inc()` adds 1 to progress. `update(n)` sets it directly. Both stop at the task's total.
+
 `with_spinner(inch::spinners::LINE)` picks one of the 50 single-character spinners from [cli-spinners](https://github.com/sindresorhus/cli-spinners). The default is `DOTS`.
+
+`with_style(inch::Style::Worm)` swaps the filled bar for an inchworm that crawls along it. The fill character becomes the trail it leaves behind, and the empty character is the track ahead:
+
+```
+[        ▁▃▁··········] 42%
+```
 
 `cargo run` runs the demo in `src/main.rs`. `cargo run --example spinners [name]` previews the spinners.
 

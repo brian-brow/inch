@@ -5,7 +5,7 @@ use inch::Bar;
 
 fn main() {
     let installs = [
-        ("installing your mom...", 10_000),
+        ("installing money...", 10_000),
         ("downloading rocket league...", 20_000),
         ("uninstalling rocket league...", 7_000),
     ];
@@ -28,18 +28,20 @@ fn main() {
         "that wasn't even my fault",
     ];
 
-    let mut bar = Bar::new().with_empty('·');
+    // let mut bar = Bar::new().with_fill(' ').with_empty('·').with_style(inch::Style::Worm);
+    let mut bar = Bar::new().with_fill('*').with_empty('·');
     let mut stop = false;
 
     for (title, total) in installs {
         bar.start(title, total);
-        for i in 0..=total {
-            bar.update(i);
+        for i in 0..total {
+            bar.inc();
             thread::sleep(Duration::from_micros(200));
-            if title == "installing your mom..." && i == 5000 {
+            if title == "installing money..." && i == 5000 {
                 bar.println(
                     &"this log line is far too long for any reasonable terminal ".repeat(6),
                 );
+                bar.println("wow!!!!!!");
             }
             if title == "downloading rocket league..." {
                 if i % 4000 == 0 {

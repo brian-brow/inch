@@ -17,7 +17,7 @@ const DEFAULT_WIDTH: usize = 20;
 /// Fill character used when the caller doesn't set one.
 const DEFAULT_FILL: char = '█';
 /// Empty character used when the caller doesn't set one.
-const DEFAULT_EMPTY: char = '░';
+const DEFAULT_EMPTY: char = '·';
 
 /// Spinner used when the caller doesn't set one.
 const DEFAULT_SPINNER: Spinner = spinners::DOTS;
@@ -26,19 +26,39 @@ const MAX_TICK: Duration = Duration::from_millis(80);
 /// Most log lines shown under a running task.
 const LOG_LIMIT: usize = 10;
 
+/// The worm's gait, one body shape per frame, each ending at the head (last char).
+/// Stretched, tail creeps in, bunched up, head reaches out, then back to stretched.
+const WORM: &[&str] = &["▁▁▁▁", "▁▃▁", "▆▁", "▁▃▁"];
+/// How long each worm frame shows.
+const WORM_STEP: Duration = Duration::from_millis(240);
+
+/// How the bar between the brackets is drawn.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Style {
+    /// Filled blocks up to the progress, empty after.
+    #[default]
+    Blocks,
+    /// An inchworm crawling along the bar, leaving the fill behind it.
+    Worm,
+}
+
+/// The redraw thread and the sender that stops it
+struct Ticker {
+    /// Dropping this sender disconnects the channel, which stops the ticker.
+    stop: Sender<()>,
+    handle: JoinHandle<()>,
+}
+
 /// A progress bar drawn to stderr, reused across tasks.
 pub struct Bar {
     state: Arc<Mutex<State>>,
-    /// Dropping this sender disconnects the channel, which stops the ticker.
-    stop: Option<Sender<()>>,
-    ticker: Option<JoinHandle<()>>,
+    ticker: Option<Ticker>,
 }
 
 impl Bar {
     pub fn new() -> Self {
         Self {
             state: Arc::new(Mutex::new(State::new())),
-            stop: None,
             ticker: None,
         }
     }
@@ -63,6 +83,12 @@ impl Bar {
         self
     }
 
+    /// Picks how the bar is drawn. See [`Style`].
+    pub fn with_style(self, style: Style) -> Self {
+        self.state.lock().unwrap().style = style;
+        self
+    }
+
     /// Begins a new task, cancelling the current one if it never completed.
     pub fn start(&mut self, title: &str, total: usize) {
         self.stop_ticker();
@@ -78,7 +104,7 @@ impl Bar {
 
         let (tx, rx) = mpsc::channel::<()>();
         let state = Arc::clone(&self.state);
-        self.ticker = Some(thread::spawn(move || {
+        let handle = thread::spawn(move || {
             loop {
                 state.lock().unwrap().draw();
                 match rx.recv_timeout(tick) {
@@ -86,13 +112,18 @@ impl Bar {
                     _ => break,
                 }
             }
-        }));
-        self.stop = Some(tx);
+        });
+        self.ticker = Some(Ticker { stop: tx, handle });
     }
 
     /// Sets progress, clamped to the task's total.
     pub fn update(&self, progress: usize) {
         self.state.lock().unwrap().update(progress);
+    }
+
+    /// Adds 1 to progress, stopping at the task's total.
+    pub fn inc(&self) {
+        self.state.lock().unwrap().inc();
     }
 
     /// Adds a line to the running task's log, or prints it directly when no bar is drawn.
@@ -114,8 +145,8 @@ impl Bar {
     }
 
     fn stop_ticker(&mut self) {
-        self.stop = None;
-        if let Some(handle) = self.ticker.take() {
+        if let Some(Ticker { stop, handle }) = self.ticker.take() {
+            drop(stop);
             let _ = handle.join();
         }
     }
@@ -142,6 +173,7 @@ struct State {
     fill_char: char,
     empty_char: char,
     spinner: Spinner,
+    style: Style,
     is_tty: bool,
     task: Option<Task>,
 }
@@ -153,6 +185,7 @@ impl State {
             fill_char: DEFAULT_FILL,
             empty_char: DEFAULT_EMPTY,
             spinner: DEFAULT_SPINNER,
+            style: Style::Blocks,
             is_tty: stderr().is_terminal(),
             task: None,
         }
@@ -170,15 +203,53 @@ impl State {
         }
     }
 
+    fn inc(&mut self) {
+        if let Some(task) = &mut self.task {
+            task.inc();
+        }
+    }
+
+    fn bar(&self, task: &Task) -> String {
+        if self.width == 0 {
+            return String::new();
+        }
+        match self.style {
+            Style::Blocks => {
+                let filled = scale(task.progress, task.total, self.width);
+
+                let mut bar = String::new();
+                bar.extend(std::iter::repeat_n(self.fill_char, filled));
+                bar.extend(std::iter::repeat_n(self.empty_char, self.width - filled));
+                bar
+            }
+            Style::Worm => {
+                let head = scale(task.progress, task.total, self.width.saturating_sub(1));
+                let phase = (task.started.elapsed().as_millis() / WORM_STEP.as_millis()) as usize;
+                let head = head.min(self.width - 1);
+
+                let frame: Vec<char> = WORM[phase % WORM.len()].chars().collect();
+                let visible = &frame[frame.len().saturating_sub(head + 1)..];
+                let before = head + 1 - visible.len();
+                let after = self.width - head - 1;
+
+                let mut bar = String::new();
+                bar.extend(std::iter::repeat_n(self.fill_char, before));
+                bar.extend(visible);
+                bar.extend(std::iter::repeat_n(self.empty_char, after));
+                bar
+            }
+        }
+    }
+
     fn draw(&mut self) {
         if !self.is_tty {
             return;
         }
+        let Some(task) = &self.task else { return };
+        let bar = self.bar(task);
+
         let Some(task) = &mut self.task else { return };
         let percentage = scale(task.progress, task.total, 100);
-        let filled = scale(task.progress, task.total, self.width);
-        let fill = self.fill_char.to_string().repeat(filled);
-        let empty = self.empty_char.to_string().repeat(self.width - filled);
         let spinner = self.spinner.frame(task.started.elapsed());
 
         let mut frame = String::new();
@@ -194,7 +265,7 @@ impl State {
         )
         .unwrap();
         task.write_logs(&mut frame, LOG_LIMIT);
-        writeln!(frame, "\r{CSI}2K[{fill}{empty}] {percentage}%").unwrap();
+        writeln!(frame, "\r{CSI}2K[{bar}] {percentage}%").unwrap();
         writeln!(frame).unwrap();
         write!(frame, "{CSI}?7h").unwrap();
 
@@ -264,6 +335,10 @@ impl Task {
         self.progress = progress.min(self.total);
     }
 
+    fn inc(&mut self) {
+        self.update(self.progress.saturating_add(1));
+    }
+
     fn write_logs(&self, out: &mut String, limit: usize) {
         let shown = &self.logs[self.logs.len().saturating_sub(limit)..];
         for (i, log) in shown.iter().enumerate() {
@@ -317,5 +392,14 @@ mod tests {
     fn huge_totals_dont_overflow() {
         assert_eq!(scale(usize::MAX, usize::MAX, 100), 100);
         assert_eq!(scale(usize::MAX / 2, usize::MAX, 100), 49);
+    }
+
+    #[test]
+    fn inc_stops_at_total() {
+        let mut task = Task::new("t", 2);
+        task.inc();
+        task.inc();
+        task.inc();
+        assert_eq!(task.progress, 2);
     }
 }
