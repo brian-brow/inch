@@ -30,7 +30,7 @@ const LOG_LIMIT: usize = 10;
 /// Stretched, tail creeps in, arches up, bunches, then reaches back out to stretched.
 /// Each cell of progress plays every frame once, so more frames make a smoother step,
 /// not a slower one.
-const WORM: &[&str] = &["▁▁▁▁", "▁▁▂▁", "▁▄▁", "▇▁", "▁▄▁", "▁▂▁▁"];
+const WORM: &[&str] = &["▁▁▁▁", "▁▁▂▁", "▁▄▁", "▇▁", "▁▄▁", "▁▁▂▁"];
 
 /// How the bar between the brackets is drawn.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -53,14 +53,14 @@ struct Ticker {
 /// A progress bar drawn to stderr, reused across tasks.
 pub struct Bar {
     state: Arc<Mutex<State>>,
-    ticker: Option<Ticker>,
+    ticker: Mutex<Option<Ticker>>,
 }
 
 impl Bar {
     pub fn new() -> Self {
         Self {
             state: Arc::new(Mutex::new(State::new())),
-            ticker: None,
+            ticker: Mutex::new(None),
         }
     }
 
@@ -90,8 +90,18 @@ impl Bar {
         self
     }
 
+    pub fn wrap<I>(&self, title: &str, iter: I) -> Wrap<'_, I::IntoIter>
+    where
+        I: IntoIterator,
+        I::IntoIter: ExactSizeIterator,
+    {
+        let inner = iter.into_iter();
+        self.start(title, inner.len());
+        Wrap { bar: self, inner }
+    }
+
     /// Begins a new task, cancelling the current one if it never completed.
-    pub fn start(&mut self, title: &str, total: usize) {
+    pub fn start(&self, title: &str, total: usize) {
         self.stop_ticker();
 
         let tick = {
@@ -114,7 +124,7 @@ impl Bar {
                 }
             }
         });
-        self.ticker = Some(Ticker { stop: tx, handle });
+        *self.ticker.lock().unwrap() = Some(Ticker { stop: tx, handle });
     }
 
     /// Sets progress, clamped to the task's total.
@@ -127,6 +137,11 @@ impl Bar {
         self.state.lock().unwrap().inc();
     }
 
+    /// Renames the running task. The next redraw and the final line use the new title.
+    pub fn set_title(&self, title: &str) {
+        self.state.lock().unwrap().set_title(title);
+    }
+
     /// Adds a line to the running task's log, or prints it directly when no bar is drawn.
     pub fn println(&self, message: &str) {
         if let Ok(mut state) = self.state.lock()
@@ -135,18 +150,25 @@ impl Bar {
         {
             task.logs.push(message.to_string());
         } else {
-            eprintln!("{message}");
+            let _ = writeln!(stderr(), "{message}");
         }
     }
 
     /// Replaces the bar and its logs with a single ✓ line.
-    pub fn complete(&mut self) {
+    pub fn complete(&self) {
         self.stop_ticker();
         self.state.lock().unwrap().complete();
     }
 
-    fn stop_ticker(&mut self) {
-        if let Some(Ticker { stop, handle }) = self.ticker.take() {
+    /// Ends the task with a red ✗, its full log, and `reason` as the last line.
+    pub fn fail(&self, reason: &str) {
+        self.stop_ticker();
+        self.state.lock().unwrap().fail(reason);
+    }
+
+    fn stop_ticker(&self) {
+        let ticker = self.ticker.lock().unwrap().take();
+        if let Some(Ticker { stop, handle }) = ticker {
             drop(stop);
             let _ = handle.join();
         }
@@ -210,6 +232,12 @@ impl State {
         }
     }
 
+    fn set_title(&mut self, title: &str) {
+        if let Some(task) = &mut self.task {
+            task.title = title.to_string();
+        }
+    }
+
     fn bar(&self, task: &Task) -> String {
         if self.width == 0 {
             return String::new();
@@ -270,23 +298,25 @@ impl State {
         writeln!(frame).unwrap();
         write!(frame, "{CSI}?7h").unwrap();
 
-        eprint!("{frame}");
+        let _ = write!(stderr(), "{frame}");
         task.drawn = frame.matches('\n').count();
-        stderr().flush().unwrap();
+        let _ = stderr().flush();
     }
 
     fn finish(&self, task: &Task, color: &str, icon: char, prefix: &str) {
         if self.is_tty {
-            eprint!("{CSI}{}A", task.drawn);
-            eprint!("\r{CSI}0J");
-            eprintln!(
+            let _ = write!(stderr(), "{CSI}{}A", task.drawn);
+            let _ = write!(stderr(), "\r{CSI}0J");
+            let _ = writeln!(
+                stderr(),
                 "{CSI}{color}{icon}{CSI}0m {} {CSI}90m{prefix}{:.1?}{CSI}0m",
                 task.title,
                 task.started.elapsed()
             );
             let _ = stderr().flush();
         } else {
-            eprintln!(
+            let _ = writeln!(
+                stderr(),
                 "{icon} {} {prefix}{:.1?}",
                 task.title,
                 task.started.elapsed()
@@ -294,14 +324,29 @@ impl State {
         }
     }
 
-    fn cancel(&mut self) {
-        let Some(task) = self.task.take() else { return };
-        self.finish(&task, "31m", '✗', "cancelled after ");
+    fn interrupt(&mut self, word: &str, reason: Option<&str>) {
+        let Some(mut task) = self.task.take() else {
+            return;
+        };
+        if let Some(reason) = reason {
+            task.logs.push(reason.to_string());
+        }
+        self.finish(&task, "31m", '✗', &format!("{word} after "));
         if self.is_tty {
             let mut dump = String::new();
             task.write_logs(&mut dump, task.logs.len());
-            eprint!("{dump}");
+            let _ = write!(stderr(), "{dump}");
+        } else if let Some(reason) = reason {
+            let _ = writeln!(stderr(), "{reason}");
         }
+    }
+
+    fn cancel(&mut self) {
+        self.interrupt("cancelled", None);
+    }
+
+    fn fail(&mut self, reason: &str) {
+        self.interrupt("failed", Some(reason));
     }
 
     fn complete(&mut self) {
@@ -349,6 +394,30 @@ impl Task {
                 "├─ "
             };
             writeln!(out, "\r{CSI}2K{CSI}2m{prefix}{log}{CSI}0m").unwrap();
+        }
+    }
+}
+
+/// An iterator that advances a bar one step per item and completes it when it runs out.
+/// Made by [`Bar::wrap`].
+pub struct Wrap<'a, I> {
+    bar: &'a Bar,
+    inner: I,
+}
+
+impl<'a, I: Iterator> Iterator for Wrap<'a, I> {
+    type Item = I::Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.inner.next() {
+            Some(item) => {
+                self.bar.inc();
+                Some(item)
+            }
+            None => {
+                self.bar.complete();
+                None
+            }
         }
     }
 }

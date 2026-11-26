@@ -16,7 +16,7 @@ A small terminal progress bar for Rust. Standard library only.
 - **Always moving.** A background thread redraws at least every 80ms, so the spinner, timer and worm move even when progress stalls.
 - **Finished work collapses.** `complete()` replaces the bar and its logs with one `✓` line, so a run leaves a clean list of what was done and how long it took.
 - **Logs belong to their task.** `println()` adds a line to the running task's log. The last 10 show under the title while it runs.
-- **Failure keeps its context.** A task that never completes, because the bar is dropped or `start` is called again, leaves a red `✗ ... cancelled after 1.2s` with its full log underneath.
+- **Failure keeps its context.** `fail(reason)` leaves a red `✗ ... failed after 1.2s` with its full log underneath and the reason as the last line. A task that never finishes, because the bar is dropped or `start` is called again, leaves `✗ ... cancelled after 1.2s` the same way.
 - **Pipes keep everything.** When stderr is not a terminal, nothing animates. Logs print as they arrive and each task ends with one plain `✓` or `✗` line.
 
 ## Usage
@@ -36,7 +36,16 @@ for i in 0..100 {
 bar.complete();
 ```
 
-`inc()` adds 1 to progress. `update(n)` sets it directly. Both stop at the task's total.
+`wrap(title, iter)` runs a task over any iterator with a known length. It adds 1 per item and completes when the loop ends:
+
+```rust
+for file in bar.wrap("copying...", files) {
+    copy(file);
+    bar.println("copied");
+}
+```
+
+`inc()` adds 1 to progress. `update(n)` sets it directly. Both stop at the task's total. `set_title()` renames the running task, and `fail(reason)` ends it as failed instead of `complete()`.
 
 `with_spinner(inch::spinners::LINE)` picks one of the 50 single-character spinners from [cli-spinners](https://github.com/sindresorhus/cli-spinners). The default is `DOTS`.
 
@@ -46,7 +55,7 @@ bar.complete();
 [        ▁▃▁··········] 42%
 ```
 
-`cargo run` runs the demo in `src/main.rs`. `cargo run --example spinners [name]` previews the spinners.
+`cargo run` runs the demo in `src/main.rs`: one Rocket League session that installs, updates, fails to find a match, plays one with the worm, and gets cancelled mid rage-quit. `cargo run --example spinners [name]` previews the spinners.
 
 ## Does not
 
