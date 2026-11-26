@@ -293,8 +293,8 @@ impl State {
             task.started.elapsed()
         )
         .unwrap();
-        task.write_logs(&mut frame, LOG_LIMIT);
         writeln!(frame, "\r{CSI}2K[{bar}] {percentage}%").unwrap();
+        task.write_logs(&mut frame, LOG_LIMIT);
         writeln!(frame).unwrap();
         write!(frame, "{CSI}?7h").unwrap();
 
